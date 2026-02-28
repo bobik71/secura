@@ -1,0 +1,97 @@
+#7498829389:AAHSj3argQwK2fWF88q5X64mUH1kUvsw_eY
+
+import telebot
+from telebot import types
+import time
+import threading
+from datetime import datetime, timedelta
+
+# Вставьте сюда ваш токен
+TOKEN = '7498829389:AAHSj3argQwK2fWF88q5X64mUH1kUvsw_eY'
+bot = telebot.TeleBot(TOKEN)
+
+# Словарь для хранения данных пользователей
+user_data = {}
+
+@bot.message_handler(commands=['start'])
+def start(message):
+    bot.send_message(message.chat.id, "Привет! Я бот, который будет присылать тебе ежедневные задачи. "
+                                        "Используй команду /set <время> <задача> <кол-во раз в день>, чтобы установить время и задачу.\n"
+                                        "Формат времени: HH:MM\n"
+                                        "Формат кол-ва раз: 1, 2 и т.д.")
+
+@bot.message_handler(commands=['set'])
+def set_task(message):
+    command_parts = message.text.split(maxsplit=3)
+    if len(command_parts) < 4:
+        bot.send_message(message.chat.id, "Пожалуйста, укажите время, задачу и количество раз в день в формате: /set <время> <задача> <кол-во раз в день>\n"
+                                            "Формат времени: HH:MM")
+        return
+    
+    time_str = command_parts[1]
+    user_task = command_parts[2]
+    try:
+        times_per_day = int(command_parts[3])
+    except ValueError:
+        bot.send_message(message.chat.id, "Количество раз в день должно быть числом.")
+        return
+
+    try:
+        hour, minute = map(int, time_str.split(':'))
+        
+        user_data[message.chat.id] = {
+            'task': user_task,
+            'time': (hour, minute),
+            'times_per_day': times_per_day,
+            'task_count': 0
+        }
+        
+        bot.send_message(message.chat.id, f"Задача установлена: '{user_task}' на {time_str} каждый день.\n"
+                                            f"Количество раз в день: {times_per_day}.",
+                         reply_markup=generate_inline_keyboard())
+
+        # Запускаем поток для отправки задачи
+        threading.Thread(target=send_daily_task, args=(message.chat.id, user_task, (hour, minute), times_per_day)).start()
+    
+    except ValueError:
+        bot.send_message(message.chat.id, "Ошибка в формате времени. Пожалуйста, используйте формат HH:MM.")
+
+def generate_inline_keyboard():
+    keyboard = types.InlineKeyboardMarkup()
+    keyboard.add(types.InlineKeyboardButton("Удалить задачу", callback_data="delete_task"))
+    return keyboard
+
+def send_daily_task(chat_id, user_task, task_time, times_per_day):
+    while True:
+        now = datetime.now()
+        current_time = (now.hour, now.minute)
+
+        # Проверяем, совпадает ли текущее время с установленным
+        if current_time == task_time and user_data[chat_id]['task_count'] < times_per_day:
+            bot.send_message(chat_id, user_task)
+            user_data[chat_id]['task_count'] += 1
+            
+            if user_data[chat_id]['task_count'] >= times_per_day:
+                time.sleep(60)  # Ждем 60 секунд перед сбросом счетчика
+                user_data[chat_id]['task_count'] = 0
+            
+            time.sleep(60)  # Ждем 60 секунд, чтобы избежать повторной отправки в ту же минуту
+        else:
+            # Вычисляем время до следующего запуска
+            next_run_time = now.replace(hour=task_time[0], minute=task_time[1], second=0, microsecond=0)
+            if next_run_time < now:
+                next_run_time += timedelta(days=1)  # Если время уже прошло, планируем на завтра
+
+            sleep_time = (next_run_time - now).total_seconds()
+            time.sleep(sleep_time)  # Ждем до следующего запуска
+
+@bot.callback_query_handler(func=lambda call: call.data == "delete_task")
+def delete_task(call):
+    if call.from_user.id in user_data:
+        del user_data[call.from_user.id]
+        bot.send_message(call.from_user.id, "Задача удалена.")
+    else:
+        bot.send_message(call.from_user.id, "У вас нет активной задачи.")
+
+bot.polling()
+
