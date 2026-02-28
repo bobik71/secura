@@ -49,3 +49,5 @@ def process_length_input(message):
 # Запуск
 print("Бот запущен...")
 bot.polling(none_stop=True)
+#rrr
+print('hello World')
